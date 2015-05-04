@@ -22,6 +22,11 @@
 //
 ////////////////////////////////////////////////////////////
 
+// Disable warning C4996: Calling std::copy_n() with raw pointers may be unsafe
+#ifdef _MSC_VER
+    #define _SCL_SECURE_NO_WARNINGS
+#endif
+
 
 ////////////////////////////////////////////////////////////
 // Headers
@@ -133,7 +138,8 @@ namespace
         return available;
     }
 
-    // Functors to call a glUniform*() variant.
+
+    // Functors to call a glUniform*() variant
     template <typename Arg0>
     struct UniformSetter1
     {
@@ -225,6 +231,57 @@ namespace
         Arg2    v2;
         Arg3    v3;
     };
+		
+	// Transforms an array of 2D vectors into a contiguous array of scalars
+	template <typename T>
+	std::vector<T> createContiguousArray(const sf::Vector2<T>* vectorArray, std::size_t length)
+	{
+		const std::size_t vectorSize = 2;
+
+		std::vector<T> contiguous(vectorSize * length);
+		for (std::size_t i = 0; i < length; ++i)
+		{
+			contiguous[vectorSize * i]     = vectorArray[i].x;
+			contiguous[vectorSize * i + 1] = vectorArray[i].y;
+		}
+
+		return contiguous;
+	}
+
+	// Transforms an array of 3D vectors into a contiguous array of scalars
+	template <typename T>
+	std::vector<T> createContiguousArray(const sf::Vector3<T>* vectorArray, std::size_t length)
+	{
+		const std::size_t vectorSize = 3;
+
+		std::vector<T> contiguous(vectorSize * length);
+		for (std::size_t i = 0; i < length; ++i)
+		{
+			contiguous[vectorSize * i]     = vectorArray[i].x;
+			contiguous[vectorSize * i + 1] = vectorArray[i].y;
+			contiguous[vectorSize * i + 2] = vectorArray[i].z;
+		}
+
+		return contiguous;
+	}
+
+	// Transforms an array of 4D vectors into a contiguous array of scalars
+	template <typename T>
+	std::vector<T> createContiguousArray(const sf::Shader::Vector4<T>* vectorArray, std::size_t length)
+	{
+		const std::size_t vectorSize = 4;
+
+		std::vector<T> contiguous(vectorSize * length);
+		for (std::size_t i = 0; i < length; ++i)
+		{
+			contiguous[vectorSize * i]     = vectorArray[i].x;
+			contiguous[vectorSize * i + 1] = vectorArray[i].y;
+			contiguous[vectorSize * i + 2] = vectorArray[i].z;
+			contiguous[vectorSize * i + 3] = vectorArray[i].w;
+		}
+
+		return contiguous;
+	}
 }
 
 
@@ -361,68 +418,206 @@ bool Shader::loadFromStream(InputStream& vertexShaderStream, InputStream& fragme
 
 
 ////////////////////////////////////////////////////////////
-void Shader::setParameter(const std::string& name, float x)
+void Shader::setUniformFloat(const std::string& name, float x)
 {
 	UniformSetter1<GLfloat> setter(GLEXT_glUniform1f, x);
-	setParameterImpl(name, setter);
+    setUniformImpl(name, setter);
 }
 
 
 ////////////////////////////////////////////////////////////
-void Shader::setParameter(const std::string& name, float x, float y)
+void Shader::setUniformVec2(const std::string& name, const Vec2& v)
 {
-	UniformSetter2<GLfloat, GLfloat> setter(GLEXT_glUniform2f, x, y);
-	setParameterImpl(name, setter);
+	UniformSetter2<GLfloat, GLfloat> setter(GLEXT_glUniform2f, v.x, v.y);
+	setUniformImpl(name, setter);
 }
 
 
 ////////////////////////////////////////////////////////////
-void Shader::setParameter(const std::string& name, float x, float y, float z)
+void Shader::setUniformVec3(const std::string& name, const Vec3& v)
 {
-	UniformSetter3<GLfloat, GLfloat, GLfloat> setter(GLEXT_glUniform3f, x, y, z);
-	setParameterImpl(name, setter);
+	UniformSetter3<GLfloat, GLfloat, GLfloat> setter(GLEXT_glUniform3f, v.x, v.y, v.z);
+	setUniformImpl(name, setter);
 }
 
 
 ////////////////////////////////////////////////////////////
-void Shader::setParameter(const std::string& name, float x, float y, float z, float w)
+void Shader::setUniformVec4(const std::string& name, const Vec4& v)
 {
-	UniformSetter4<GLfloat, GLfloat, GLfloat, GLfloat> setter(GLEXT_glUniform4f, x, y, z, w);
-	setParameterImpl(name, setter);
+	UniformSetter4<GLfloat, GLfloat, GLfloat, GLfloat> setter(GLEXT_glUniform4f, v.x, v.y, v.z, v.w);
+	setUniformImpl(name, setter);
 }
 
 
 ////////////////////////////////////////////////////////////
-void Shader::setParameter(const std::string& name, const Vector2f& v)
+void Shader::setUniformVec4(const std::string& name, const Color& color)
 {
-    setParameter(name, v.x, v.y);
+	setUniformVec4(name, Vec4(color.r / 255.f, color.g / 255.f, color.b / 255.f, color.a / 255.f));
 }
 
 
 ////////////////////////////////////////////////////////////
-void Shader::setParameter(const std::string& name, const Vector3f& v)
+void Shader::setUniformInt(const std::string& name, int x)
 {
-    setParameter(name, v.x, v.y, v.z);
+	UniformSetter1<GLint> setter(GLEXT_glUniform1i, x);
+	setUniformImpl(name, setter);
 }
 
 
 ////////////////////////////////////////////////////////////
-void Shader::setParameter(const std::string& name, const Color& color)
+void Shader::setUniformIvec2(const std::string& name, const Ivec2& v)
 {
-    setParameter(name, color.r / 255.f, color.g / 255.f, color.b / 255.f, color.a / 255.f);
+	UniformSetter2<GLint, GLint> setter(GLEXT_glUniform2i, v.x, v.y);
+    setUniformImpl(name, setter);
 }
 
 
 ////////////////////////////////////////////////////////////
-void Shader::setParameter(const std::string& name, const Transform& transform)
+void Shader::setUniformIvec3(const std::string& name, const Ivec3& v)
 {
-	UniformSetter3<GLsizei, GLboolean, const GLfloat*> setter(GLEXT_glUniformMatrix4fv, 1, GL_FALSE, transform.getMatrix());
-	setParameterImpl(name, setter);
+	UniformSetter3<GLint, GLint, GLint> setter(GLEXT_glUniform3i, v.x, v.y, v.z);
+	setUniformImpl(name, setter);
 }
 
 
 ////////////////////////////////////////////////////////////
-void Shader::setParameter(const std::string& name, const Texture& texture)
+void Shader::setUniformIvec4(const std::string& name, const Ivec4& v)
+{
+	UniformSetter4<GLint, GLint, GLint, GLint> setter(GLEXT_glUniform4i, v.x, v.y, v.z, v.w);
+	setUniformImpl(name, setter);
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setUniformBool(const std::string& name, bool x)
+{
+    setUniformInt(name, static_cast<int>(x));
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setUniformBvec2(const std::string& name, const Bvec2& v)
+{
+    setUniformIvec2(name, Ivec2(v));
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setUniformBvec3(const std::string& name, const Bvec3& v)
+{
+    setUniformIvec3(name, Ivec3(v));
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setUniformBvec4(const std::string& name, const Bvec4& v)
+{
+    setUniformIvec4(name, Ivec4(v));
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setUniformMat3(const std::string& name, const float* pointer)
+{
+	UniformSetter3<GLsizei, GLboolean, const GLfloat*> setter(GLEXT_glUniformMatrix3fv, 1, GL_FALSE, pointer);
+	setUniformImpl(name, setter);
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setUniformMat3(const std::string& name, const Mat3& matrix)
+{
+	setUniformMat3(name, matrix.pointer);
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setUniformMat4(const std::string& name, const float* pointer)
+{
+	UniformSetter3<GLsizei, GLboolean, const GLfloat*> setter(GLEXT_glUniformMatrix4fv, 1, GL_FALSE, pointer);
+	setUniformImpl(name, setter);
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setUniformMat4(const std::string& name, const Mat4& matrix)
+{
+    setUniformMat4(name, matrix.pointer);
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setUniformMat4(const std::string& name, const Transform& transform)
+{
+	setUniformMat4(name, transform.getMatrix());
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setUniformFloatArray(const std::string& name, const float* valueArray, std::size_t length)
+{
+	UniformSetter2<GLsizei, const GLfloat*> setter(GLEXT_glUniform1fv, length, valueArray);
+    setUniformImpl(name, setter);
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setUniformVec2Array(const std::string& name, const Vector2f* vectorArray, std::size_t length)
+{
+	std::vector<float> contiguous = createContiguousArray(vectorArray, length);
+	UniformSetter2<GLsizei, const GLfloat*> setter(GLEXT_glUniform2fv, length, &contiguous[0]);
+	setUniformImpl(name, setter);
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setUniformVec3Array(const std::string& name, const Vector3f* vectorArray, std::size_t length)
+{
+	std::vector<float> contiguous = createContiguousArray(vectorArray, length);
+	UniformSetter2<GLsizei, const GLfloat*> setter(GLEXT_glUniform3fv, length, &contiguous[0]);
+	setUniformImpl(name, setter);
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setUniformVec4Array(const std::string& name, const Vec4* vectorArray, std::size_t length)
+{
+	std::vector<float> contiguous = createContiguousArray(vectorArray, length);
+	UniformSetter2<GLsizei, const GLfloat*> setter(GLEXT_glUniform4fv, length, &contiguous[0]);
+	setUniformImpl(name, setter);
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setUniformMat3Array(const std::string& name, const Mat3* matrixArray, std::size_t length)
+{
+    const std::size_t matrixSize = 3 * 3;
+
+    std::vector<float> contiguous(matrixSize * length);
+    for (std::size_t i = 0; i < length; ++i)
+        std::copy_n(matrixArray[i].pointer, matrixSize, &contiguous[matrixSize * i]);
+
+	UniformSetter3<GLsizei, GLboolean, const GLfloat*> setter(GLEXT_glUniformMatrix3fv, length, GL_FALSE, &contiguous[0]);
+    setUniformImpl(name, setter);
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setUniformMat4Array(const std::string& name, const Mat4* matrixArray, std::size_t length)
+{
+    const std::size_t matrixSize = 4 * 4;
+
+    std::vector<float> contiguous(matrixSize * length);
+    for (std::size_t i = 0; i < length; ++i)
+        std::copy_n(matrixArray[i].pointer, matrixSize, &contiguous[matrixSize * i]);
+
+	UniformSetter3<GLsizei, GLboolean, const GLfloat*> setter(GLEXT_glUniformMatrix4fv, length, GL_FALSE, &contiguous[0]);
+    setUniformImpl(name, setter);
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setUniformSampler2D(const std::string& name, const Texture& texture)
 {
     if (m_shaderProgram)
     {
@@ -457,7 +652,7 @@ void Shader::setParameter(const std::string& name, const Texture& texture)
 
 
 ////////////////////////////////////////////////////////////
-void Shader::setParameter(const std::string& name, CurrentTextureType)
+void Shader::setUniformSampler2D(const std::string& name, CurrentTextureType)
 {
     if (m_shaderProgram)
     {
@@ -466,6 +661,76 @@ void Shader::setParameter(const std::string& name, CurrentTextureType)
         // Find the location of the variable in the shader
         m_currentTexture = getParamLocation(name);
     }
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setParameter(const std::string& name, float x)
+{
+	setUniformFloat(name, x);
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setParameter(const std::string& name, float x, float y)
+{
+	setUniformVec2(name, Vec2(x, y));
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setParameter(const std::string& name, float x, float y, float z)
+{
+	setUniformVec3(name, Vec3(x, y, z));
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setParameter(const std::string& name, float x, float y, float z, float w)
+{
+	setUniformVec4(name, Vec4(x, y, z, w));
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setParameter(const std::string& name, const Vector2f& v)
+{
+	setUniformVec2(name, v);
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setParameter(const std::string& name, const Vector3f& v)
+{
+	setUniformVec3(name, v);
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setParameter(const std::string& name, const Color& color)
+{
+	setUniformVec4(name, color);
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setParameter(const std::string& name, const Transform& transform)
+{
+	setUniformMat4(name, transform);
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setParameter(const std::string& name, const Texture& texture)
+{
+	setUniformSampler2D(name, texture);
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setParameter(const std::string& name, CurrentTextureType)
+{
+	setUniformSampler2D(name, CurrentTexture);
 }
 
 
@@ -671,7 +936,7 @@ int Shader::getParamLocation(const std::string& name)
 }
 
 template <typename F>
-void Shader::setParameterImpl(const std::string& name, F functor)
+void Shader::setUniformImpl(const std::string& name, F functor)
 {
     if (m_shaderProgram)
     {
@@ -762,25 +1027,25 @@ bool Shader::loadFromStream(InputStream& vertexShaderStream, InputStream& fragme
 
 
 ////////////////////////////////////////////////////////////
-void Shader::setParameter(const std::string& name, float x)
+void Shader::setParameter(const std::string& name, int x)
 {
 }
 
 
 ////////////////////////////////////////////////////////////
-void Shader::setParameter(const std::string& name, float x, float y)
+void Shader::setParameter(const std::string& name, int x, int y)
 {
 }
 
 
 ////////////////////////////////////////////////////////////
-void Shader::setParameter(const std::string& name, float x, float y, float z)
+void Shader::setParameter(const std::string& name, int x, int y, int z)
 {
 }
 
 
 ////////////////////////////////////////////////////////////
-void Shader::setParameter(const std::string& name, float x, float y, float z, float w)
+void Shader::setParameter(const std::string& name, int x, int y, int z, int w)
 {
 }
 
