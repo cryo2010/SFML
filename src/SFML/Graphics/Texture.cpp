@@ -37,10 +37,47 @@
 #include <cassert>
 #include <cstring>
 
+#ifdef SFML_OPENGL_ES
+
+    #include <SFML/OpenGL.hpp>
+
+#endif // SFML_OPENGL_ES
+
+#define GLEXT_GL_CLAMP_TO_EDGE 0x812F
 
 namespace
 {
     sf::Mutex mutex;
+
+#ifndef SFML_OPENGL_ES
+
+    bool GLEXT_texture_edge_clamp = false;
+    bool GLEXT_texture_non_power_of_two = false;
+
+#else
+
+    #define GLEXT_texture_edge_clamp       true
+    #define GLEXT_texture_non_power_of_two false
+
+#endif // SFML_OPENGL_ES
+
+    void ensureExtensionInit()
+    {
+#ifndef SFML_OPENGL_ES
+
+        static bool loaded = false;
+
+        if (loaded)
+            return;
+
+        loaded = true;
+
+        GLEXT_texture_edge_clamp = sf::Context::isExtensionAvailable("GL_SGIS_texture_edge_clamp") || sf::Context::isExtensionAvailable("GL_EXT_texture_edge_clamp");
+
+        GLEXT_texture_non_power_of_two = sf::Context::isExtensionAvailable("GL_ARB_texture_non_power_of_two");
+
+#endif // SFML_OPENGL_ES
+    }
 
     // Thread-safe unique identifier generator,
     // is used for states cache (see RenderTarget)
@@ -156,14 +193,12 @@ bool Texture::create(unsigned int width, unsigned int height)
     }
 
     // Make sure that extensions are initialized
-    priv::ensureExtensionsInit();
+    ensureExtensionInit();
 
     // Make sure that the current texture binding will be preserved
     priv::TextureSaver save;
 
-    static bool textureEdgeClamp = GLEXT_texture_edge_clamp || GLEXT_EXT_texture_edge_clamp;
-
-    if (!m_isRepeated && !textureEdgeClamp)
+    if (!m_isRepeated && !GLEXT_texture_edge_clamp)
     {
         static bool warned = false;
 
@@ -180,8 +215,8 @@ bool Texture::create(unsigned int width, unsigned int height)
     // Initialize the texture
     glCheck(glBindTexture(GL_TEXTURE_2D, m_texture));
     glCheck(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, m_actualSize.x, m_actualSize.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL));
-    glCheck(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, m_isRepeated ? GL_REPEAT : (textureEdgeClamp ? GLEXT_GL_CLAMP_TO_EDGE : GLEXT_GL_CLAMP)));
-    glCheck(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, m_isRepeated ? GL_REPEAT : (textureEdgeClamp ? GLEXT_GL_CLAMP_TO_EDGE : GLEXT_GL_CLAMP)));
+    glCheck(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, m_isRepeated ? GL_REPEAT : (GLEXT_texture_edge_clamp ? GLEXT_GL_CLAMP_TO_EDGE : GL_CLAMP)));
+    glCheck(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, m_isRepeated ? GL_REPEAT : (GLEXT_texture_edge_clamp ? GLEXT_GL_CLAMP_TO_EDGE : GL_CLAMP)));
     glCheck(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, m_isSmooth ? GL_LINEAR : GL_NEAREST));
     glCheck(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, m_isSmooth ? GL_LINEAR : GL_NEAREST));
     m_cacheId = getUniqueId();
@@ -485,9 +520,7 @@ void Texture::setRepeated(bool repeated)
             // Make sure that the current texture binding will be preserved
             priv::TextureSaver save;
 
-            static bool textureEdgeClamp = GLEXT_texture_edge_clamp || GLEXT_EXT_texture_edge_clamp;
-
-            if (!m_isRepeated && !textureEdgeClamp)
+            if (!m_isRepeated && !GLEXT_texture_edge_clamp)
             {
                 static bool warned = false;
 
@@ -502,8 +535,8 @@ void Texture::setRepeated(bool repeated)
             }
 
             glCheck(glBindTexture(GL_TEXTURE_2D, m_texture));
-            glCheck(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, m_isRepeated ? GL_REPEAT : (textureEdgeClamp ? GLEXT_GL_CLAMP_TO_EDGE : GLEXT_GL_CLAMP)));
-            glCheck(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, m_isRepeated ? GL_REPEAT : (textureEdgeClamp ? GLEXT_GL_CLAMP_TO_EDGE : GLEXT_GL_CLAMP)));
+            glCheck(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, m_isRepeated ? GL_REPEAT : (GLEXT_texture_edge_clamp ? GLEXT_GL_CLAMP_TO_EDGE : GL_CLAMP)));
+            glCheck(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, m_isRepeated ? GL_REPEAT : (GLEXT_texture_edge_clamp ? GLEXT_GL_CLAMP_TO_EDGE : GL_CLAMP)));
         }
     }
 }
@@ -615,7 +648,7 @@ unsigned int Texture::getValidSize(unsigned int size)
     ensureGlContext();
 
     // Make sure that extensions are initialized
-    priv::ensureExtensionsInit();
+    ensureExtensionInit();
 
     if (GLEXT_texture_non_power_of_two)
     {

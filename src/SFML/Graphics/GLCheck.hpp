@@ -29,8 +29,24 @@
 // Headers
 ////////////////////////////////////////////////////////////
 #include <SFML/Config.hpp>
-#include <SFML/Graphics/GLExtensions.hpp>
+#include <SFML/OpenGL.hpp>
 #include <string>
+
+#ifndef GL_FUNCPTR
+    #if defined(SFML_SYSTEM_WINDOWS)
+        #ifndef APIENTRY
+            #if defined(__MINGW32__) || defined(__CYGWIN__) || (_MSC_VER >= 800) || defined(_STDCALL_SUPPORTED) || defined(__BORLANDC__)
+                #define APIENTRY __stdcall
+            #else
+                #define APIENTRY
+            #endif
+        #endif
+
+        #define GL_FUNCPTR APIENTRY
+    #else
+        #define GL_FUNCPTR
+    #endif
+#endif
 
 
 namespace sf

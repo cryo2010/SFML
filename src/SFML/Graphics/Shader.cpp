@@ -37,24 +37,140 @@
 #include <fstream>
 #include <vector>
 
-
 #ifndef SFML_OPENGL_ES
 
 #if defined(SFML_SYSTEM_MACOS) || defined(SFML_SYSTEM_IOS)
+
+    typedef void* GLhandleARB;
 
     #define castToGlHandle(x) reinterpret_cast<GLEXT_GLhandle>(static_cast<ptrdiff_t>(x))
     #define castFromGlHandle(x) static_cast<unsigned int>(reinterpret_cast<ptrdiff_t>(x))
 
 #else
 
+    typedef unsigned int GLhandleARB;
+
     #define castToGlHandle(x) (x)
     #define castFromGlHandle(x) (x)
 
 #endif
 
+typedef char GLcharARB;
+
+#define GLEXT_GL_TEXTURE0                         0x84C0
+
+#define GLEXT_GLhandle                            GLhandleARB
+
+#define GLEXT_GL_PROGRAM_OBJECT                   0x8B40
+#define GLEXT_GL_OBJECT_COMPILE_STATUS            0x8B81
+#define GLEXT_GL_OBJECT_LINK_STATUS               0x8B82
+#define GLEXT_GL_VERTEX_SHADER                    0x8B31
+#define GLEXT_GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS 0x8B4D
+#define GLEXT_GL_FRAGMENT_SHADER                  0x8B30
+
 namespace
 {
     sf::Mutex mutex;
+
+    bool GLEXT_multitexture = false;
+    bool GLEXT_shading_language_100 = false;
+    bool GLEXT_shader_objects = false;
+    bool GLEXT_vertex_shader = false;
+    bool GLEXT_fragment_shader = false;
+
+    void (GL_FUNCPTR *GLEXT_glActiveTexture)(GLenum) = NULL;
+    void (GL_FUNCPTR *GLEXT_glClientActiveTexture)(GLenum) = NULL;
+
+    void (GL_FUNCPTR *GLEXT_glAttachObject)(GLhandleARB, GLhandleARB) = NULL;
+    void (GL_FUNCPTR *GLEXT_glCompileShader)(GLhandleARB) = NULL;
+    GLhandleARB (GL_FUNCPTR *GLEXT_glCreateProgramObject)() = NULL;
+    GLhandleARB (GL_FUNCPTR *GLEXT_glCreateShaderObject)(GLenum) = NULL;
+    void (GL_FUNCPTR *GLEXT_glDeleteObject)(GLhandleARB) = NULL;
+    GLhandleARB (GL_FUNCPTR *GLEXT_glGetHandle)(GLenum) = NULL;
+    void (GL_FUNCPTR *GLEXT_glGetInfoLog)(GLhandleARB, GLsizei, GLsizei *, GLcharARB *) = NULL;
+    void (GL_FUNCPTR *GLEXT_glGetObjectParameteriv)(GLhandleARB, GLenum, GLint *) = NULL;
+    GLint (GL_FUNCPTR *GLEXT_glGetUniformLocation)(GLhandleARB, const GLcharARB *) = NULL;
+    void (GL_FUNCPTR *GLEXT_glLinkProgram)(GLhandleARB) = NULL;
+    void (GL_FUNCPTR *GLEXT_glShaderSource)(GLhandleARB, GLsizei, const GLcharARB **, const GLint *) = NULL;
+    void (GL_FUNCPTR *GLEXT_glUniform1f)(GLint, GLfloat) = NULL;
+    void (GL_FUNCPTR *GLEXT_glUniform1i)(GLint, GLint) = NULL;
+    void (GL_FUNCPTR *GLEXT_glUniform2f)(GLint, GLfloat, GLfloat) = NULL;
+    void (GL_FUNCPTR *GLEXT_glUniform3f)(GLint, GLfloat, GLfloat, GLfloat) = NULL;
+    void (GL_FUNCPTR *GLEXT_glUniform4f)(GLint, GLfloat, GLfloat, GLfloat, GLfloat) = NULL;
+    void (GL_FUNCPTR *GLEXT_glUniformMatrix4fv)(GLint, GLsizei, GLboolean, const GLfloat *) = NULL;
+    void (GL_FUNCPTR *GLEXT_glUseProgramObject)(GLhandleARB) = NULL;
+
+    void ensureExtensionInit()
+    {
+        static bool loaded = false;
+
+        if (loaded)
+            return;
+
+        loaded = true;
+
+        GLEXT_multitexture = sf::Context::isExtensionAvailable("GL_ARB_multitexture");
+
+        if (GLEXT_multitexture)
+        {
+            GLEXT_glActiveTexture = (void (GL_FUNCPTR *)(GLenum))sf::Context::getFunction("glActiveTextureARB");
+            GLEXT_glClientActiveTexture = (void (GL_FUNCPTR *)(GLenum))sf::Context::getFunction("glClientActiveTextureARB");
+
+            if (!GLEXT_glActiveTexture ||
+                !GLEXT_glClientActiveTexture)
+                GLEXT_multitexture = false;
+        }
+
+        GLEXT_shading_language_100 = sf::Context::isExtensionAvailable("GL_ARB_shading_language_100");
+
+        GLEXT_shader_objects = sf::Context::isExtensionAvailable("GL_ARB_shader_objects");
+
+        if (GLEXT_shader_objects)
+        {
+            GLEXT_glAttachObject = (void (GL_FUNCPTR *)(GLhandleARB, GLhandleARB))sf::Context::getFunction("glAttachObjectARB");
+            GLEXT_glCompileShader = (void (GL_FUNCPTR *)(GLhandleARB))sf::Context::getFunction("glCompileShaderARB");
+            GLEXT_glCreateProgramObject = (GLhandleARB (GL_FUNCPTR *)())sf::Context::getFunction("glCreateProgramObjectARB");
+            GLEXT_glCreateShaderObject = (GLhandleARB (GL_FUNCPTR *)(GLenum))sf::Context::getFunction("glCreateShaderObjectARB");
+            GLEXT_glDeleteObject = (void (GL_FUNCPTR *)(GLhandleARB))sf::Context::getFunction("glDeleteObjectARB");
+            GLEXT_glGetHandle = (GLhandleARB (GL_FUNCPTR *)(GLenum))sf::Context::getFunction("glGetHandleARB");
+            GLEXT_glGetInfoLog = (void (GL_FUNCPTR *)(GLhandleARB, GLsizei, GLsizei *, GLcharARB *))sf::Context::getFunction("glGetInfoLogARB");
+            GLEXT_glGetObjectParameteriv = (void (GL_FUNCPTR *)(GLhandleARB, GLenum, GLint *))sf::Context::getFunction("glGetObjectParameterivARB");
+            GLEXT_glGetUniformLocation = (GLint (GL_FUNCPTR *)(GLhandleARB, const GLcharARB *))sf::Context::getFunction("glGetUniformLocationARB");
+            GLEXT_glLinkProgram = (void (GL_FUNCPTR *)(GLhandleARB))sf::Context::getFunction("glLinkProgramARB");
+            GLEXT_glShaderSource = (void (GL_FUNCPTR *)(GLhandleARB, GLsizei, const GLcharARB **, const GLint *))sf::Context::getFunction("glShaderSourceARB");
+            GLEXT_glUniform1f = (void (GL_FUNCPTR *)(GLint, GLfloat))sf::Context::getFunction("glUniform1fARB");
+            GLEXT_glUniform1i = (void (GL_FUNCPTR *)(GLint, GLint))sf::Context::getFunction("glUniform1iARB");
+            GLEXT_glUniform2f = (void (GL_FUNCPTR *)(GLint, GLfloat, GLfloat))sf::Context::getFunction("glUniform2fARB");
+            GLEXT_glUniform3f = (void (GL_FUNCPTR *)(GLint, GLfloat, GLfloat, GLfloat))sf::Context::getFunction("glUniform3fARB");
+            GLEXT_glUniform4f = (void (GL_FUNCPTR *)(GLint, GLfloat, GLfloat, GLfloat, GLfloat))sf::Context::getFunction("glUniform4fARB");
+            GLEXT_glUniformMatrix4fv = (void (GL_FUNCPTR *)(GLint, GLsizei, GLboolean, const GLfloat *))sf::Context::getFunction("glUniformMatrix4fvARB");
+            GLEXT_glUseProgramObject = (void (GL_FUNCPTR *)(GLhandleARB))sf::Context::getFunction("glUseProgramObjectARB");
+
+            if (!GLEXT_glAttachObject ||
+                !GLEXT_glCompileShader ||
+                !GLEXT_glCreateProgramObject ||
+                !GLEXT_glCreateShaderObject ||
+                !GLEXT_glDeleteObject ||
+                !GLEXT_glGetHandle ||
+                !GLEXT_glGetInfoLog ||
+                !GLEXT_glGetObjectParameteriv ||
+                !GLEXT_glGetUniformLocation ||
+                !GLEXT_glLinkProgram ||
+                !GLEXT_glShaderSource ||
+                !GLEXT_glUniform1f ||
+                !GLEXT_glUniform1i ||
+                !GLEXT_glUniform2f ||
+                !GLEXT_glUniform3f ||
+                !GLEXT_glUniform4f ||
+                !GLEXT_glUniformMatrix4fv ||
+                !GLEXT_glUseProgramObject)
+                GLEXT_shader_objects = false;
+        }
+
+        GLEXT_vertex_shader = sf::Context::isExtensionAvailable("GL_ARB_vertex_shader");
+
+        GLEXT_fragment_shader = sf::Context::isExtensionAvailable("GL_ARB_fragment_shader");
+    }
 
     GLint checkMaxTextureUnits()
     {
@@ -122,7 +238,7 @@ namespace
         sf::Context context;
 
         // Make sure that extensions are initialized
-        sf::priv::ensureExtensionsInit();
+        ensureExtensionInit();
 
         bool available = GLEXT_multitexture         &&
                          GLEXT_shading_language_100 &&

@@ -28,6 +28,8 @@
 #include <SFML/Graphics/GLCheck.hpp>
 #include <SFML/System/Err.hpp>
 
+#define GLEXT_GL_INVALID_FRAMEBUFFER_OPERATION 0x0506
+
 
 namespace sf
 {

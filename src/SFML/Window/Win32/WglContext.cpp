@@ -27,45 +27,124 @@
 ////////////////////////////////////////////////////////////
 #include <SFML/Window/WindowImpl.hpp> // included first to avoid a warning about macro redefinition
 #include <SFML/Window/Win32/WglContext.hpp>
-#include <SFML/Window/Win32/WglExtensions.hpp>
 #include <SFML/System/Lock.hpp>
 #include <SFML/System/Mutex.hpp>
 #include <SFML/System/Err.hpp>
 #include <sstream>
+#include <cstring>
 
+#define WGLEXT_WGL_SAMPLES_ARB                           0x2042
+#define WGLEXT_WGL_SAMPLE_BUFFERS_ARB                    0x2041
+
+#define WGLEXT_WGL_ACCELERATION_ARB                      0x2003
+#define WGLEXT_WGL_ALPHA_BITS_ARB                        0x201B
+#define WGLEXT_WGL_BLUE_BITS_ARB                         0x2019
+#define WGLEXT_WGL_DEPTH_BITS_ARB                        0x2022
+#define WGLEXT_WGL_DOUBLE_BUFFER_ARB                     0x2011
+#define WGLEXT_WGL_DRAW_TO_WINDOW_ARB                    0x2001
+#define WGLEXT_WGL_FULL_ACCELERATION_ARB                 0x2027
+#define WGLEXT_WGL_GREEN_BITS_ARB                        0x2017
+#define WGLEXT_WGL_PIXEL_TYPE_ARB                        0x2013
+#define WGLEXT_WGL_RED_BITS_ARB                          0x2015
+#define WGLEXT_WGL_STENCIL_BITS_ARB                      0x2023
+#define WGLEXT_WGL_SUPPORT_OPENGL_ARB                    0x2010
+#define WGLEXT_WGL_TYPE_RGBA_ARB                         0x202B
+
+#define WGLEXT_WGL_CONTEXT_DEBUG_BIT_ARB                 0x00000001
+#define WGLEXT_WGL_CONTEXT_FLAGS_ARB                     0x2094
+#define WGLEXT_WGL_CONTEXT_MAJOR_VERSION_ARB             0x2091
+#define WGLEXT_WGL_CONTEXT_MINOR_VERSION_ARB             0x2092
+
+#define WGLEXT_WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB 0x00000002
+#define WGLEXT_WGL_CONTEXT_CORE_PROFILE_BIT_ARB          0x00000001
+#define WGLEXT_WGL_CONTEXT_PROFILE_MASK_ARB              0x9126
+
+
+namespace
+{
+    bool WGLEXT_swap_control = false;
+    bool WGLEXT_multisample = false;
+    bool WGLEXT_pixel_format = false;
+    bool WGLEXT_create_context = false;
+    bool WGLEXT_create_context_profile = false;
+
+    BOOL (WINAPI *WGLEXT_wglSwapIntervalEXT)(int) = NULL;
+
+    BOOL (WINAPI *WGLEXT_wglChoosePixelFormatARB)(HDC, const int*, const FLOAT*, UINT, int*, UINT*) = NULL;
+    BOOL (WINAPI *WGLEXT_wglGetPixelFormatAttribivARB)(HDC, int, int, UINT, const int*, int*) = NULL;
+
+    HGLRC (WINAPI *WGLEXT_wglCreateContextAttribsARB)(HDC, HGLRC, const int*) = NULL;
+
+    void ensureExtensionInit(HDC deviceContext)
+    {
+        static bool loaded = false;
+
+        if (loaded)
+            return;
+
+        loaded = true;
+
+        const char* (WINAPI *WGLEXT_wglGetExtensionsStringARB)(HDC) = NULL;
+        WGLEXT_wglGetExtensionsStringARB = (const char* (WINAPI *)(HDC))sf::Context::getFunction("wglGetExtensionsStringARB");
+
+        const char* extensions = WGLEXT_wglGetExtensionsStringARB(deviceContext);
+
+        if (!extensions)
+            return;
+
+        WGLEXT_swap_control = std::strstr(extensions, "WGL_EXT_swap_control");
+
+        if (WGLEXT_swap_control)
+        {
+            WGLEXT_wglSwapIntervalEXT = (BOOL (WINAPI *)(int))sf::Context::getFunction("wglSwapIntervalEXT");
+
+            if (!WGLEXT_wglSwapIntervalEXT)
+                WGLEXT_swap_control = false;
+        }
+
+        WGLEXT_multisample = std::strstr(extensions, "WGL_ARB_multisample");
+
+        WGLEXT_pixel_format = std::strstr(extensions, "WGL_ARB_pixel_format");
+
+        if (WGLEXT_pixel_format)
+        {
+            WGLEXT_wglChoosePixelFormatARB = (BOOL (WINAPI *)(HDC, const int*, const FLOAT*, UINT, int*, UINT*))sf::Context::getFunction("wglChoosePixelFormatARB");
+            WGLEXT_wglGetPixelFormatAttribivARB = (BOOL (WINAPI *)(HDC, int, int, UINT, const int*, int*))sf::Context::getFunction("wglGetPixelFormatAttribivARB");
+
+            if (!WGLEXT_wglChoosePixelFormatARB ||
+                !WGLEXT_wglGetPixelFormatAttribivARB)
+                WGLEXT_pixel_format = false;
+        }
+
+        WGLEXT_create_context = std::strstr(extensions, "WGL_ARB_create_context");
+
+        if (WGLEXT_create_context)
+        {
+            WGLEXT_wglCreateContextAttribsARB = (HGLRC (WINAPI *)(HDC, HGLRC, const int*))sf::Context::getFunction("wglCreateContextAttribsARB");
+
+            if (!WGLEXT_wglCreateContextAttribsARB)
+                WGLEXT_create_context = false;
+        }
+
+        WGLEXT_create_context_profile = std::strstr(extensions, "WGL_ARB_create_context_profile");
+    }
+
+    sf::String getErrorString(DWORD errorCode)
+    {
+        std::basic_ostringstream<TCHAR, std::char_traits<TCHAR> > ss;
+        TCHAR errBuff[256];
+        FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM, NULL, errorCode, 0, errBuff, sizeof(errBuff), NULL);
+        ss << errBuff;
+        sf::String errMsg(ss.str());
+
+        return errMsg;
+    }
+}
 
 namespace sf
 {
 namespace priv
 {
-////////////////////////////////////////////////////////////
-void ensureExtensionsInit(HDC deviceContext)
-{
-    static bool initialized = false;
-    if (!initialized)
-    {
-        initialized = true;
-
-        // We don't check the return value since the extension
-        // flags are cleared even if loading fails
-        sfwgl_LoadFunctions(deviceContext);
-    }
-}
-
-
-////////////////////////////////////////////////////////////
-String getErrorString(DWORD errorCode)
-{
-    std::basic_ostringstream<TCHAR, std::char_traits<TCHAR> > ss;
-    TCHAR errBuff[256];
-    FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM, NULL, errorCode, 0, errBuff, sizeof(errBuff), NULL);
-    ss << errBuff;
-    String errMsg(ss.str());
-
-    return errMsg;
-}
-
-
 ////////////////////////////////////////////////////////////
 WglContext::WglContext(WglContext* shared) :
 m_window       (NULL),
@@ -194,11 +273,11 @@ void WglContext::display()
 void WglContext::setVerticalSyncEnabled(bool enabled)
 {
     // Make sure that extensions are initialized
-    ensureExtensionsInit(m_deviceContext);
+    ensureExtensionInit(m_deviceContext);
 
-    if (sfwgl_ext_EXT_swap_control == sfwgl_LOAD_SUCCEEDED)
+    if (WGLEXT_swap_control)
     {
-        if (wglSwapIntervalEXT(enabled ? 1 : 0) == FALSE)
+        if (WGLEXT_wglSwapIntervalEXT(enabled ? 1 : 0) == FALSE)
             err() << "Setting vertical sync failed" << std::endl;
     }
     else
@@ -221,22 +300,22 @@ int WglContext::selectBestPixelFormat(HDC deviceContext, unsigned int bitsPerPix
 {
     // Let's find a suitable pixel format -- first try with wglChoosePixelFormatARB
     int bestFormat = 0;
-    if (sfwgl_ext_ARB_pixel_format == sfwgl_LOAD_SUCCEEDED)
+    if (WGLEXT_pixel_format)
     {
         // Define the basic attributes we want for our window
         int intAttributes[] =
         {
-            WGL_DRAW_TO_WINDOW_ARB, GL_TRUE,
-            WGL_SUPPORT_OPENGL_ARB, GL_TRUE,
-            WGL_DOUBLE_BUFFER_ARB,  GL_TRUE,
-            WGL_PIXEL_TYPE_ARB,     WGL_TYPE_RGBA_ARB,
-            0,                      0
+            WGLEXT_WGL_DRAW_TO_WINDOW_ARB, GL_TRUE,
+            WGLEXT_WGL_SUPPORT_OPENGL_ARB, GL_TRUE,
+            WGLEXT_WGL_DOUBLE_BUFFER_ARB,  GL_TRUE,
+            WGLEXT_WGL_PIXEL_TYPE_ARB,     WGLEXT_WGL_TYPE_RGBA_ARB,
+            0,                             0
         };
 
         // Let's check how many formats are supporting our requirements
         int   formats[512];
         UINT  nbFormats;
-        bool  isValid = wglChoosePixelFormatARB(deviceContext, intAttributes, NULL, 512, formats, &nbFormats) != 0;
+        bool  isValid = WGLEXT_wglChoosePixelFormatARB(deviceContext, intAttributes, NULL, 512, formats, &nbFormats) != 0;
 
         // Get the best format among the returned ones
         if (isValid && (nbFormats > 0))
@@ -248,31 +327,31 @@ int WglContext::selectBestPixelFormat(HDC deviceContext, unsigned int bitsPerPix
                 int values[7];
                 const int attributes[] =
                 {
-                    WGL_RED_BITS_ARB,
-                    WGL_GREEN_BITS_ARB,
-                    WGL_BLUE_BITS_ARB,
-                    WGL_ALPHA_BITS_ARB,
-                    WGL_DEPTH_BITS_ARB,
-                    WGL_STENCIL_BITS_ARB,
-                    WGL_ACCELERATION_ARB
+                    WGLEXT_WGL_RED_BITS_ARB,
+                    WGLEXT_WGL_GREEN_BITS_ARB,
+                    WGLEXT_WGL_BLUE_BITS_ARB,
+                    WGLEXT_WGL_ALPHA_BITS_ARB,
+                    WGLEXT_WGL_DEPTH_BITS_ARB,
+                    WGLEXT_WGL_STENCIL_BITS_ARB,
+                    WGLEXT_WGL_ACCELERATION_ARB
                 };
 
-                if (!wglGetPixelFormatAttribivARB(deviceContext, formats[i], PFD_MAIN_PLANE, 7, attributes, values))
+                if (!WGLEXT_wglGetPixelFormatAttribivARB(deviceContext, formats[i], PFD_MAIN_PLANE, 7, attributes, values))
                 {
                     err() << "Failed to retrieve pixel format information: " << getErrorString(GetLastError()).toAnsiString() << std::endl;
                     break;
                 }
 
                 int sampleValues[2] = {0, 0};
-                if (sfwgl_ext_ARB_multisample == sfwgl_LOAD_SUCCEEDED)
+                if (WGLEXT_multisample)
                 {
                     const int sampleAttributes[] =
                     {
-                        WGL_SAMPLE_BUFFERS_ARB,
-                        WGL_SAMPLES_ARB
+                        WGLEXT_WGL_SAMPLE_BUFFERS_ARB,
+                        WGLEXT_WGL_SAMPLES_ARB
                     };
 
-                    if (!wglGetPixelFormatAttribivARB(deviceContext, formats[i], PFD_MAIN_PLANE, 2, sampleAttributes, sampleValues))
+                    if (!WGLEXT_wglGetPixelFormatAttribivARB(deviceContext, formats[i], PFD_MAIN_PLANE, 2, sampleAttributes, sampleValues))
                     {
                         err() << "Failed to retrieve pixel format multisampling information: " << getErrorString(GetLastError()).toAnsiString() << std::endl;
                         break;
@@ -281,7 +360,7 @@ int WglContext::selectBestPixelFormat(HDC deviceContext, unsigned int bitsPerPix
 
                 // Evaluate the current configuration
                 int color = values[0] + values[1] + values[2] + values[3];
-                int score = evaluateFormat(bitsPerPixel, settings, color, values[4], values[5], sampleValues[0] ? sampleValues[1] : 0, values[6] == WGL_FULL_ACCELERATION_ARB);
+                int score = evaluateFormat(bitsPerPixel, settings, color, values[4], values[5], sampleValues[0] ? sampleValues[1] : 0, values[6] == WGLEXT_WGL_FULL_ACCELERATION_ARB);
 
                 // Keep it if it's better than the current best
                 if (score < bestScore)
@@ -326,7 +405,7 @@ void WglContext::createContext(WglContext* shared, unsigned int bitsPerPixel, co
     // Make sure that extensions are initialized if this is not the shared context
     // The shared context is the context used to initialize the extensions
     if (shared)
-        ensureExtensionsInit(m_deviceContext);
+        ensureExtensionInit(m_deviceContext);
 
     int bestFormat = selectBestPixelFormat(m_deviceContext, bitsPerPixel, settings);
 
@@ -343,12 +422,12 @@ void WglContext::createContext(WglContext* shared, unsigned int bitsPerPixel, co
     actualFormat.nVersion = 1;
     DescribePixelFormat(m_deviceContext, bestFormat, sizeof(actualFormat), &actualFormat);
 
-    if (sfwgl_ext_ARB_pixel_format == sfwgl_LOAD_SUCCEEDED)
+    if (WGLEXT_pixel_format)
     {
-        const int attributes[] = {WGL_DEPTH_BITS_ARB, WGL_STENCIL_BITS_ARB};
+        const int attributes[] = {WGLEXT_WGL_DEPTH_BITS_ARB, WGLEXT_WGL_STENCIL_BITS_ARB};
         int values[2];
 
-        if (wglGetPixelFormatAttribivARB(m_deviceContext, bestFormat, PFD_MAIN_PLANE, 2, attributes, values))
+        if (WGLEXT_wglGetPixelFormatAttribivARB(m_deviceContext, bestFormat, PFD_MAIN_PLANE, 2, attributes, values))
         {
             m_settings.depthBits   = values[0];
             m_settings.stencilBits = values[1];
@@ -360,12 +439,12 @@ void WglContext::createContext(WglContext* shared, unsigned int bitsPerPixel, co
             m_settings.stencilBits = actualFormat.cStencilBits;
         }
 
-        if (sfwgl_ext_ARB_multisample == sfwgl_LOAD_SUCCEEDED)
+        if (WGLEXT_multisample)
         {
-            const int sampleAttributes[] = {WGL_SAMPLE_BUFFERS_ARB, WGL_SAMPLES_ARB};
+            const int sampleAttributes[] = {WGLEXT_WGL_SAMPLE_BUFFERS_ARB, WGLEXT_WGL_SAMPLES_ARB};
             int sampleValues[2];
 
-            if (wglGetPixelFormatAttribivARB(m_deviceContext, bestFormat, PFD_MAIN_PLANE, 2, sampleAttributes, sampleValues))
+            if (WGLEXT_wglGetPixelFormatAttribivARB(m_deviceContext, bestFormat, PFD_MAIN_PLANE, 2, sampleAttributes, sampleValues))
             {
                 m_settings.antialiasingLevel = sampleValues[0] ? sampleValues[1] : 0;
             }
@@ -401,23 +480,23 @@ void WglContext::createContext(WglContext* shared, unsigned int bitsPerPixel, co
     // Create the OpenGL context -- first try using wglCreateContextAttribsARB
     while (!m_context && m_settings.majorVersion)
     {
-        if (sfwgl_ext_ARB_create_context == sfwgl_LOAD_SUCCEEDED)
+        if (WGLEXT_create_context)
         {
             // Check if setting the profile is supported
-            if (sfwgl_ext_ARB_create_context_profile == sfwgl_LOAD_SUCCEEDED)
+            if (WGLEXT_create_context_profile)
             {
-                int profile = (m_settings.attributeFlags & ContextSettings::Core) ? WGL_CONTEXT_CORE_PROFILE_BIT_ARB : WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB;
-                int debug = (m_settings.attributeFlags & ContextSettings::Debug) ? WGL_CONTEXT_DEBUG_BIT_ARB : 0;
+                int profile = (m_settings.attributeFlags & ContextSettings::Core) ? WGLEXT_WGL_CONTEXT_CORE_PROFILE_BIT_ARB : WGLEXT_WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB;
+                int debug = (m_settings.attributeFlags & ContextSettings::Debug) ? WGLEXT_WGL_CONTEXT_DEBUG_BIT_ARB : 0;
 
                 int attributes[] =
                 {
-                    WGL_CONTEXT_MAJOR_VERSION_ARB, static_cast<int>(m_settings.majorVersion),
-                    WGL_CONTEXT_MINOR_VERSION_ARB, static_cast<int>(m_settings.minorVersion),
-                    WGL_CONTEXT_PROFILE_MASK_ARB,  profile,
-                    WGL_CONTEXT_FLAGS_ARB,         debug,
-                    0,                             0
+                    WGLEXT_WGL_CONTEXT_MAJOR_VERSION_ARB, static_cast<int>(m_settings.majorVersion),
+                    WGLEXT_WGL_CONTEXT_MINOR_VERSION_ARB, static_cast<int>(m_settings.minorVersion),
+                    WGLEXT_WGL_CONTEXT_PROFILE_MASK_ARB,  profile,
+                    WGLEXT_WGL_CONTEXT_FLAGS_ARB,         debug,
+                    0,                                    0
                 };
-                m_context = wglCreateContextAttribsARB(m_deviceContext, sharedContext, attributes);
+                m_context = WGLEXT_wglCreateContextAttribsARB(m_deviceContext, sharedContext, attributes);
             }
             else
             {
@@ -429,11 +508,11 @@ void WglContext::createContext(WglContext* shared, unsigned int bitsPerPixel, co
 
                 int attributes[] =
                 {
-                    WGL_CONTEXT_MAJOR_VERSION_ARB, static_cast<int>(m_settings.majorVersion),
-                    WGL_CONTEXT_MINOR_VERSION_ARB, static_cast<int>(m_settings.minorVersion),
-                    0,                             0
+                    WGLEXT_WGL_CONTEXT_MAJOR_VERSION_ARB, static_cast<int>(m_settings.majorVersion),
+                    WGLEXT_WGL_CONTEXT_MINOR_VERSION_ARB, static_cast<int>(m_settings.minorVersion),
+                    0,                                    0
                 };
-                m_context = wglCreateContextAttribsARB(m_deviceContext, sharedContext, attributes);
+                m_context = WGLEXT_wglCreateContextAttribsARB(m_deviceContext, sharedContext, attributes);
             }
         }
         else

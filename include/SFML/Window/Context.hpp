@@ -89,6 +89,16 @@ public:
     static GlFunctionPointer getFunction(const char* name);
 
     ////////////////////////////////////////////////////////////
+    /// \brief Check whether a given OpenGL extension is available
+    ///
+    /// \param name Name of the extension to check for
+    ///
+    /// \return True if available, false if unavailable
+    ///
+    ////////////////////////////////////////////////////////////
+    static bool isExtensionAvailable(const char* name);
+
+    ////////////////////////////////////////////////////////////
     /// \brief Construct a in-memory context
     ///
     /// This constructor is for internal use, you don't need

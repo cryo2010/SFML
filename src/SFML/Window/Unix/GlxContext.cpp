@@ -31,16 +31,104 @@
 #include <SFML/System/Mutex.hpp>
 #include <SFML/System/Lock.hpp>
 #include <SFML/System/Err.hpp>
+#include <cstring>
 
 #if !defined(GLX_DEBUGGING) && defined(SFML_DEBUG)
     // Enable this to print messages to err() everytime GLX produces errors
     //#define GLX_DEBUGGING
 #endif
 
+#define GLXEXT_GLX_SAMPLES_ARB                           100001
+#define GLXEXT_GLX_SAMPLE_BUFFERS_ARB                    100000
+
+#define GLXEXT_GLX_CONTEXT_DEBUG_BIT_ARB                 0x00000001
+#define GLXEXT_GLX_CONTEXT_FLAGS_ARB                     0x2094
+#define GLXEXT_GLX_CONTEXT_MAJOR_VERSION_ARB             0x2091
+#define GLXEXT_GLX_CONTEXT_MINOR_VERSION_ARB             0x2092
+
+#define GLXEXT_GLX_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB 0x00000002
+#define GLXEXT_GLX_CONTEXT_CORE_PROFILE_BIT_ARB          0x00000001
+#define GLXEXT_GLX_CONTEXT_PROFILE_MASK_ARB              0x9126
+
+
 namespace
 {
     sf::Mutex glxErrorMutex;
     bool glxErrorOccurred = false;
+
+    bool GLXEXT_EXT_swap_control = false;
+    bool GLXEXT_MESA_swap_control = false;
+    bool GLXEXT_SGI_swap_control = false;
+    bool GLXEXT_multisample = false;
+    bool GLXEXT_create_context = false;
+    bool GLXEXT_create_context_profile = false;
+
+    void (*GLXEXT_glXSwapIntervalEXT)(Display*, GLXDrawable, int) = NULL;
+
+    int (*GLXEXT_glXSwapIntervalMESA)(int) = NULL;
+
+    int (*GLXEXT_glXSwapIntervalSGI)(int) = NULL;
+
+    GLXContext (*GLXEXT_glXCreateContextAttribsARB)(Display*, GLXFBConfig, GLXContext, Bool, const int*) = NULL;
+
+    void ensureExtensionInit(::Display* display, int screen)
+    {
+        static bool loaded = false;
+
+        if (loaded)
+            return;
+
+        loaded = true;
+
+        const char* extensions = (const char*)glXQueryExtensionsString(display, screen);
+
+        if (!extensions)
+            return;
+
+        GLXEXT_EXT_swap_control = std::strstr(extensions, "GLX_EXT_swap_control");
+
+        if (GLXEXT_EXT_swap_control)
+        {
+            GLXEXT_glXSwapIntervalEXT = (void (*)(Display*, GLXDrawable, int))sf::Context::getFunction("glXSwapIntervalEXT");
+
+            if (!GLXEXT_glXSwapIntervalEXT)
+                GLXEXT_EXT_swap_control = false;
+        }
+
+        GLXEXT_MESA_swap_control = std::strstr(extensions, "GLX_MESA_swap_control");
+
+        if (GLXEXT_MESA_swap_control)
+        {
+            GLXEXT_glXSwapIntervalMESA = (int (*)(int))sf::Context::getFunction("glXSwapIntervalMESA");
+
+            if (!GLXEXT_glXSwapIntervalMESA)
+                GLXEXT_MESA_swap_control = false;
+        }
+
+        GLXEXT_SGI_swap_control = std::strstr(extensions, "GLX_SGI_swap_control");
+
+        if (GLXEXT_SGI_swap_control)
+        {
+            GLXEXT_glXSwapIntervalSGI = (int (*)(int))sf::Context::getFunction("glXSwapIntervalSGI");
+
+            if (!GLXEXT_glXSwapIntervalSGI)
+                GLXEXT_SGI_swap_control = false;
+        }
+
+        GLXEXT_multisample = std::strstr(extensions, "GLX_ARB_multisample");
+
+        GLXEXT_create_context = std::strstr(extensions, "GLX_ARB_create_context");
+
+        if (GLXEXT_create_context)
+        {
+            GLXEXT_glXCreateContextAttribsARB = (GLXContext (*)(Display*, GLXFBConfig, GLXContext, Bool, const int*))sf::Context::getFunction("glXCreateContextAttribsARB");
+
+            if (!GLXEXT_glXCreateContextAttribsARB)
+                GLXEXT_create_context = false;
+        }
+
+        GLXEXT_create_context_profile = std::strstr(extensions, "GLX_ARB_create_context_profile");
+    }
 
     int HandleXError(::Display*, XErrorEvent*)
     {
@@ -73,26 +161,10 @@ namespace
     };
 }
 
-
 namespace sf
 {
 namespace priv
 {
-////////////////////////////////////////////////////////////
-void ensureExtensionsInit(::Display* display, int screen)
-{
-    static bool initialized = false;
-    if (!initialized)
-    {
-        initialized = true;
-
-        // We don't check the return value since the extension
-        // flags are cleared even if loading fails
-        sfglx_LoadFunctions(display, screen);
-    }
-}
-
-
 ////////////////////////////////////////////////////////////
 GlxContext::GlxContext(GlxContext* shared) :
 m_window    (0),
@@ -274,7 +346,7 @@ void GlxContext::display()
 void GlxContext::setVerticalSyncEnabled(bool enabled)
 {
     // Make sure that extensions are initialized
-    ensureExtensionsInit(m_display, DefaultScreen(m_display));
+    ensureExtensionInit(m_display, DefaultScreen(m_display));
 
     int result = 0;
 
@@ -282,17 +354,17 @@ void GlxContext::setVerticalSyncEnabled(bool enabled)
     // We use the direct pointer to the MESA entry point instead of the alias
     // because glx.h declares the entry point as an external function
     // which would require us to link in an additional library
-    if (sfglx_ext_EXT_swap_control == sfglx_LOAD_SUCCEEDED)
+    if (GLXEXT_EXT_swap_control)
     {
-        glXSwapIntervalEXT(m_display, glXGetCurrentDrawable(), enabled ? 1 : 0);
+        GLXEXT_glXSwapIntervalEXT(m_display, glXGetCurrentDrawable(), enabled ? 1 : 0);
     }
-    else if (sfglx_ext_MESA_swap_control == sfglx_LOAD_SUCCEEDED)
+    else if (GLXEXT_MESA_swap_control)
     {
-        result = sf_ptrc_glXSwapIntervalMESA(enabled ? 1 : 0);
+        result = GLXEXT_glXSwapIntervalMESA(enabled ? 1 : 0);
     }
-    else if (sfglx_ext_SGI_swap_control == sfglx_LOAD_SUCCEEDED)
+    else if (GLXEXT_SGI_swap_control)
     {
-        result = glXSwapIntervalSGI(enabled ? 1 : 0);
+        result = GLXEXT_glXSwapIntervalSGI(enabled ? 1 : 0);
     }
     else
     {
@@ -339,10 +411,10 @@ XVisualInfo GlxContext::selectBestVisual(::Display* display, unsigned int bitsPe
             glXGetConfig(display, &visuals[i], GLX_DEPTH_SIZE,   &depth);
             glXGetConfig(display, &visuals[i], GLX_STENCIL_SIZE, &stencil);
 
-            if (sfglx_ext_ARB_multisample == sfglx_LOAD_SUCCEEDED)
+            if (GLXEXT_multisample)
             {
-                glXGetConfig(display, &visuals[i], GLX_SAMPLE_BUFFERS_ARB, &multiSampling);
-                glXGetConfig(display, &visuals[i], GLX_SAMPLES_ARB,        &samples);
+                glXGetConfig(display, &visuals[i], GLXEXT_GLX_SAMPLE_BUFFERS_ARB, &multiSampling);
+                glXGetConfig(display, &visuals[i], GLXEXT_GLX_SAMPLES_ARB,        &samples);
             }
             else
             {
@@ -413,10 +485,10 @@ void GlxContext::createContext(GlxContext* shared, unsigned int bitsPerPixel, co
     // Make sure that extensions are initialized if this is not the shared context
     // The shared context is the context used to initialize the extensions
     if (shared)
-        ensureExtensionsInit(m_display, DefaultScreen(m_display));
+        ensureExtensionInit(m_display, DefaultScreen(m_display));
 
     // Check if glXCreateContextAttribsARB is available (requires GLX 1.3 or greater)
-    bool hasCreateContextArb = (sfglx_ext_ARB_create_context == sfglx_LOAD_SUCCEEDED) && ((major > 1) || (minor >= 3));
+    bool hasCreateContextArb = (GLXEXT_create_context) && ((major > 1) || (minor >= 3));
 
     // Check if we need to use glXCreateContextAttribsARB
     bool needCreateContextArb = false;
@@ -458,26 +530,26 @@ void GlxContext::createContext(GlxContext* shared, unsigned int bitsPerPixel, co
         while (config && !m_context && m_settings.majorVersion)
         {
             // Check if setting the profile is supported
-            if (sfglx_ext_ARB_create_context_profile == sfglx_LOAD_SUCCEEDED)
+            if (GLXEXT_create_context_profile)
             {
-                int profile = (m_settings.attributeFlags & ContextSettings::Core) ? GLX_CONTEXT_CORE_PROFILE_BIT_ARB : GLX_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB;
-                int debug = (m_settings.attributeFlags & ContextSettings::Debug) ? GLX_CONTEXT_DEBUG_BIT_ARB : 0;
+                int profile = (m_settings.attributeFlags & ContextSettings::Core) ? GLXEXT_GLX_CONTEXT_CORE_PROFILE_BIT_ARB : GLXEXT_GLX_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB;
+                int debug = (m_settings.attributeFlags & ContextSettings::Debug) ? GLXEXT_GLX_CONTEXT_DEBUG_BIT_ARB : 0;
 
                 // Create the context
                 int attributes[] =
                 {
-                    GLX_CONTEXT_MAJOR_VERSION_ARB, static_cast<int>(m_settings.majorVersion),
-                    GLX_CONTEXT_MINOR_VERSION_ARB, static_cast<int>(m_settings.minorVersion),
-                    GLX_CONTEXT_PROFILE_MASK_ARB,  profile,
-                    GLX_CONTEXT_FLAGS_ARB,         debug,
-                    0,                             0
+                    GLXEXT_GLX_CONTEXT_MAJOR_VERSION_ARB, static_cast<int>(m_settings.majorVersion),
+                    GLXEXT_GLX_CONTEXT_MINOR_VERSION_ARB, static_cast<int>(m_settings.minorVersion),
+                    GLXEXT_GLX_CONTEXT_PROFILE_MASK_ARB,  profile,
+                    GLXEXT_GLX_CONTEXT_FLAGS_ARB,         debug,
+                    0,                                    0
                 };
 
                 // RAII GLX error handler (we simply ignore errors here)
                 // On an error, glXCreateContextAttribsARB will return 0 anyway
                 GlxErrorHandler handler(m_display);
 
-                m_context = glXCreateContextAttribsARB(m_display, *config, toShare, true, attributes);
+                m_context = GLXEXT_glXCreateContextAttribsARB(m_display, *config, toShare, true, attributes);
             }
             else
             {
@@ -490,16 +562,16 @@ void GlxContext::createContext(GlxContext* shared, unsigned int bitsPerPixel, co
                 // Create the context
                 int attributes[] =
                 {
-                    GLX_CONTEXT_MAJOR_VERSION_ARB, static_cast<int>(m_settings.majorVersion),
-                    GLX_CONTEXT_MINOR_VERSION_ARB, static_cast<int>(m_settings.minorVersion),
-                    0,                             0
+                    GLXEXT_GLX_CONTEXT_MAJOR_VERSION_ARB, static_cast<int>(m_settings.majorVersion),
+                    GLXEXT_GLX_CONTEXT_MINOR_VERSION_ARB, static_cast<int>(m_settings.minorVersion),
+                    0,                                    0
                 };
 
                 // RAII GLX error handler (we simply ignore errors here)
                 // On an error, glXCreateContextAttribsARB will return 0 anyway
                 GlxErrorHandler handler(m_display);
 
-                m_context = glXCreateContextAttribsARB(m_display, *config, toShare, true, attributes);
+                m_context = GLXEXT_glXCreateContextAttribsARB(m_display, *config, toShare, true, attributes);
             }
 
             if (!m_context)
@@ -565,10 +637,10 @@ void GlxContext::createContext(GlxContext* shared, unsigned int bitsPerPixel, co
         glXGetConfig(m_display, visualInfo, GLX_DEPTH_SIZE,         &depth);
         glXGetConfig(m_display, visualInfo, GLX_STENCIL_SIZE,       &stencil);
 
-        if (sfglx_ext_ARB_multisample == sfglx_LOAD_SUCCEEDED)
+        if (GLXEXT_multisample)
         {
-            glXGetConfig(m_display, visualInfo, GLX_SAMPLE_BUFFERS_ARB, &multiSampling);
-            glXGetConfig(m_display, visualInfo, GLX_SAMPLES_ARB,        &samples);
+            glXGetConfig(m_display, visualInfo, GLXEXT_GLX_SAMPLE_BUFFERS_ARB, &multiSampling);
+            glXGetConfig(m_display, visualInfo, GLXEXT_GLX_SAMPLES_ARB,        &samples);
         }
         else
         {

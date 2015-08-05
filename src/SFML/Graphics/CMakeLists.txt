@@ -14,8 +14,6 @@ set(SRC
     ${INCROOT}/Glyph.hpp
     ${SRCROOT}/GLCheck.cpp
     ${SRCROOT}/GLCheck.hpp
-    ${SRCROOT}/GLExtensions.hpp
-    ${SRCROOT}/GLExtensions.cpp
     ${SRCROOT}/Image.cpp
     ${INCROOT}/Image.hpp
     ${SRCROOT}/ImageLoader.cpp
@@ -46,10 +44,6 @@ set(SRC
     ${SRCROOT}/Vertex.cpp
     ${INCROOT}/Vertex.hpp
 )
-if(NOT SFML_OPENGL_ES)
-    list(APPEND SRC ${SRCROOT}/GLLoader.cpp)
-    list(APPEND SRC ${SRCROOT}/GLLoader.hpp)
-endif()
 source_group("" FILES ${SRC})
 
 # drawables sources

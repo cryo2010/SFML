@@ -31,12 +31,162 @@
 #include <SFML/Graphics/Texture.hpp>
 #include <SFML/Graphics/VertexArray.hpp>
 #include <SFML/Graphics/GLCheck.hpp>
+#include <SFML/Window/Context.hpp>
 #include <SFML/System/Err.hpp>
+
+#ifdef SFML_OPENGL_ES
+
+    #include <SFML/OpenGL.hpp>
+
+#endif
+
 #include <iostream>
 
+#if !defined(GL_MAJOR_VERSION)
+    #define GL_MAJOR_VERSION 0x821B
+#endif
+
+#if !defined(GL_MINOR_VERSION)
+    #define GL_MINOR_VERSION 0x821C
+#endif
+
+#define GLEXT_GL_TEXTURE0      0x84C0
+
+#define GLEXT_GL_FUNC_ADD      0x8006
+#define GLEXT_GL_FUNC_SUBTRACT 0x800A
 
 namespace
 {
+#ifndef SFML_OPENGL_ES
+
+    bool GLEXT_multitexture = false;
+    bool GLEXT_blend_minmax = false;
+    bool GLEXT_blend_subtract = false;
+    bool GLEXT_blend_func_separate = false;
+    bool GLEXT_blend_equation_separate = false;
+
+    void (GL_FUNCPTR *GLEXT_glActiveTexture)(GLenum) = NULL;
+    void (GL_FUNCPTR *GLEXT_glClientActiveTexture)(GLenum) = NULL;
+
+    void (GL_FUNCPTR *GLEXT_glBlendEquation)(GLenum) = NULL;
+    void (GL_FUNCPTR *GLEXT_glBlendFuncSeparate)(GLenum, GLenum, GLenum, GLenum) = NULL;
+    void (GL_FUNCPTR *GLEXT_glBlendEquationSeparate)(GLenum, GLenum) = NULL;
+
+#else
+
+    #define GLEXT_multitexture   true
+    #define GLEXT_blend_minmax   true
+    #define GLEXT_blend_subtract GL_OES_blend_subtract
+
+    #ifdef SFML_SYSTEM_ANDROID
+        // Hack to make transparency working on some Android devices
+        #define GLEXT_blend_func_separate false
+    #else
+        #define GLEXT_blend_func_separate GL_OES_blend_func_separate
+    #endif
+
+    #ifdef SFML_SYSTEM_ANDROID
+        // Hack to make transparency working on some Android devices
+        #define GLEXT_blend_equation_separate false
+    #else
+        #define GLEXT_blend_equation_separate GL_OES_blend_equation_separate
+    #endif
+
+    #define GLEXT_glClientActiveTexture   glClientActiveTexture
+    #define GLEXT_glActiveTexture         glActiveTexture
+
+    #define GLEXT_glBlendEquation         glBlendEquationOES
+    #define GLEXT_glBlendFuncSeparate     glBlendFuncSeparateOES
+    #define GLEXT_glBlendEquationSeparate glBlendEquationSeparateOES
+
+#endif // SFML_OPENGL_ES
+
+    void ensureExtensionInit()
+    {
+        static bool loaded = false;
+
+        if (loaded)
+            return;
+
+        loaded = true;
+
+        // Retrieve the context version number
+        int majorVersion = 0;
+        int minorVersion = 0;
+
+        // Try the new way first
+        glGetIntegerv(GL_MAJOR_VERSION, &majorVersion);
+        glGetIntegerv(GL_MINOR_VERSION, &minorVersion);
+
+        if (glGetError() == GL_INVALID_ENUM)
+        {
+            // Try the old way
+            const GLubyte* version = glGetString(GL_VERSION);
+            if (version)
+            {
+                // The beginning of the returned string is "major.minor" (this is standard)
+                majorVersion = version[0] - '0';
+                minorVersion = version[2] - '0';
+            }
+            else
+            {
+                // Can't get the version number, assume 1.1
+                majorVersion = 1;
+                minorVersion = 1;
+            }
+        }
+
+        if ((majorVersion < 1) || ((majorVersion == 1) && (minorVersion < 2)))
+        {
+            sf::err() << "sfml-graphics requires support for OpenGL 1.1 or greater" << std::endl;
+            sf::err() << "Ensure that hardware acceleration is enabled if available" << std::endl;
+        }
+
+        GLEXT_multitexture = sf::Context::isExtensionAvailable("GL_ARB_multitexture");
+
+        if (GLEXT_multitexture)
+        {
+            GLEXT_glActiveTexture = (void (GL_FUNCPTR *)(GLenum))sf::Context::getFunction("glActiveTextureARB");
+            GLEXT_glClientActiveTexture = (void (GL_FUNCPTR *)(GLenum))sf::Context::getFunction("glClientActiveTextureARB");
+
+            if (!GLEXT_glActiveTexture ||
+                !GLEXT_glClientActiveTexture)
+                GLEXT_multitexture = false;
+        }
+
+        GLEXT_blend_minmax = sf::Context::isExtensionAvailable("GL_EXT_blend_minmax");
+
+        if (GLEXT_blend_minmax)
+        {
+            GLEXT_glBlendEquation = (void (GL_FUNCPTR *)(GLenum))sf::Context::getFunction("glBlendEquationEXT");
+
+            if (!GLEXT_glBlendEquation)
+                GLEXT_blend_minmax = false;
+        }
+
+        GLEXT_blend_subtract = sf::Context::isExtensionAvailable("GL_EXT_blend_subtract");
+
+        GLEXT_blend_func_separate = sf::Context::isExtensionAvailable("GL_EXT_blend_func_separate");
+
+        if (GLEXT_blend_func_separate)
+        {
+            GLEXT_glBlendFuncSeparate = (void (GL_FUNCPTR *)(GLenum, GLenum, GLenum, GLenum))sf::Context::getFunction("glBlendFuncSeparateEXT");
+
+            if (!GLEXT_glBlendFuncSeparate)
+                GLEXT_blend_func_separate = false;
+        }
+
+        GLEXT_blend_equation_separate = sf::Context::isExtensionAvailable("GL_EXT_blend_equation_separate");
+
+        if (GLEXT_blend_equation_separate)
+        {
+            GLEXT_glBlendEquationSeparate = (void (GL_FUNCPTR *)(GLenum, GLenum))sf::Context::getFunction("glBlendEquationSeparateEXT");
+
+            if (!GLEXT_glBlendEquationSeparate)
+                GLEXT_blend_equation_separate = false;
+        }
+    }
+
     // Convert an sf::BlendMode::Factor constant to the corresponding OpenGL constant.
     sf::Uint32 factorToGlConstant(sf::BlendMode::Factor blendFactor)
     {
@@ -352,7 +502,7 @@ void RenderTarget::resetGLStates()
     if (activate(true))
     {
         // Make sure that extensions are initialized
-        priv::ensureExtensionsInit();
+        ensureExtensionInit();
 
         // Make sure that the texture unit which is active is the number 0
         if (GLEXT_multitexture)
