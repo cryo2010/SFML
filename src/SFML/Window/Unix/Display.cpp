@@ -324,8 +324,6 @@ void buildKeysymMap()
         return;
     }
 
-    xcb_keycode_t range = lastKeycode - firstKeycode + 1;
-
     std::fill(keysymMap, keysymMap + 256, XK_VoidSymbol);
 
     for (xcb_keycode_t i = firstKeycode; ; ++i)
